@@ -34,4 +34,36 @@
   .btn-outline {
     @apply btn border border-gray-600 bg-transparent text-gray-300 hover:bg-gray-800 hover:border-gray-500;
   }
+
+  /* 自定义滚动条 */
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 4px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: rgb(55 65 81);
+    border-radius: 2px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: rgb(75 85 99);
+  }
+
+  /* 模型卡片动画延迟 */
+  .card-delay-1 {
+    animation-delay: 0.05s;
+  }
+  .card-delay-2 {
+    animation-delay: 0.12s;
+  }
+  .card-delay-3 {
+    animation-delay: 0.19s;
+  }
+  .card-delay-4 {
+    animation-delay: 0.26s;
+  }
 }
