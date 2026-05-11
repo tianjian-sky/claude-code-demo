@@ -204,11 +204,7 @@ export default function ModelViewer({ modelUrl }: ModelViewerProps) {
         const scale = 1.5 / maxDim;
 
         model.scale.setScalar(scale);
-        model.position.set(
-          -center.x * scale,
-          -center.y * scale,
-          -center.z * scale,
-        );
+        model.position.set(-center.x * scale, -center.y * scale, -center.z * scale);
 
         model.traverse((child) => {
           if (child instanceof THREE.Mesh) {
@@ -232,10 +228,5 @@ export default function ModelViewer({ modelUrl }: ModelViewerProps) {
     };
   }, [modelUrl]);
 
-  return (
-    <div
-      ref={containerRef}
-      className="w-full h-full"
-    />
-  );
+  return <div ref={containerRef} className="w-full h-full" />;
 }

@@ -28,9 +28,7 @@ export default function App() {
       {/* 侧边栏 */}
       <aside className="w-80 shrink-0 border-r border-gray-800 bg-gray-900 flex flex-col">
         <div className="px-6 py-5 border-b border-gray-800">
-          <h1 className="text-lg font-bold tracking-tight text-white">
-            React 3D Viewer
-          </h1>
+          <h1 className="text-lg font-bold tracking-tight text-white">React 3D Viewer</h1>
           <p className="mt-1 text-xs text-gray-500">
             React 19 + TypeScript + Webpack 5 + Tailwind CSS + Three.js
           </p>
@@ -45,14 +43,13 @@ export default function App() {
               key={model.name}
               onClick={() => setCurrentModel(model)}
               className={`w-full rounded-lg px-4 py-3 text-left transition-all duration-200
-                ${currentModel.name === model.name
-                  ? 'bg-primary-600/20 border border-primary-500/50 text-white shadow-lg shadow-primary-500/10'
-                  : 'bg-gray-800/50 border border-gray-800 hover:border-gray-700 hover:bg-gray-800 text-gray-400 hover:text-gray-200'
+                ${
+                  currentModel.name === model.name
+                    ? 'bg-primary-600/20 border border-primary-500/50 text-white shadow-lg shadow-primary-500/10'
+                    : 'bg-gray-800/50 border border-gray-800 hover:border-gray-700 hover:bg-gray-800 text-gray-400 hover:text-gray-200'
                 }`}
             >
-              <span className="block text-sm font-medium">
-                {model.name}
-              </span>
+              <span className="block text-sm font-medium">{model.name}</span>
               <span className="block mt-0.5 text-xs text-gray-500 line-clamp-2">
                 {model.description}
               </span>
@@ -69,10 +66,7 @@ export default function App() {
 
       {/* 3D 预览区 */}
       <main className="flex-1 relative bg-gray-950">
-        <ModelViewer
-          key={currentModel.url}
-          modelUrl={currentModel.url}
-        />
+        <ModelViewer key={currentModel.url} modelUrl={currentModel.url} />
         <div className="absolute bottom-4 left-4 px-3 py-1.5 rounded-md bg-gray-900/80 backdrop-blur-sm border border-gray-800">
           <span className="text-xs text-gray-400">{currentModel.name}</span>
         </div>

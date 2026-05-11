@@ -5,9 +5,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-npm run dev      # Webpack dev server on port 3000 with HMR
-npm run build    # Production build to dist/
-npm start        # Dev server + auto-open browser
+npm run dev         # Webpack dev server on port 3000 with HMR
+npm run build       # Production build to dist/
+npm start           # Dev server + auto-open browser
+npm run lint        # ESLint check (src/**/*.{ts,tsx})
+npm run lint:fix    # ESLint auto-fix
+npm run format      # Prettier format (src/**/*.{ts,tsx,css})
+npm run format:check # Prettier check only (CI)
 ```
 
 ## Architecture
