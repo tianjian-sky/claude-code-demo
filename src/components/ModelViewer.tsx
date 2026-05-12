@@ -1,15 +1,82 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
+
+const LOAD_TIMEOUT_MS = 30_000;
 
 type ModelViewerProps = {
   modelUrl: string;
   envMapUrl?: string;
 };
 
-type LoadState = 'idle' | 'loading' | 'success' | 'error';
+type LoadStatus =
+  | { type: 'idle' }
+  | { type: 'loading'; progress: number }
+  | { type: 'success' }
+  | { type: 'error'; error: LoadError };
+
+type LoadError = {
+  /** 机器可读的错误分类 */
+  kind: 'timeout' | 'not-found' | 'format' | 'network' | 'unknown';
+  /** 用户可读的中文错误信息 */
+  message: string;
+};
+
+function classifyLoadError(err: unknown, url: string): LoadError {
+  if (err instanceof Error) {
+    const msg = err.message.toLowerCase();
+
+    // DOMException / AbortError → timeout
+    if (err.name === 'AbortError' || msg.includes('timeout')) {
+      return {
+        kind: 'timeout',
+        message: `模型加载超时，请检查网络连接后重试`,
+      };
+    }
+
+    // HTTP 404 / 文件不存在
+    if (msg.includes('404') || msg.includes('not found') || msg.includes('not_found')) {
+      return {
+        kind: 'not-found',
+        message: `模型文件不存在：${url}`,
+      };
+    }
+
+    // 格式不匹配 / 解析失败
+    if (
+      msg.includes('json') ||
+      msg.includes('parse') ||
+      msg.includes('format') ||
+      msg.includes('invalid') ||
+      msg.includes('unexpected token') ||
+      msg.includes('gltf')
+    ) {
+      return {
+        kind: 'format',
+        message: `模型文件格式错误，无法解析`,
+      };
+    }
+
+    // 网络错误
+    if (
+      msg.includes('network') ||
+      msg.includes('fetch') ||
+      msg.includes('failed to fetch') ||
+      msg.includes('cors')
+    ) {
+      return {
+        kind: 'network',
+        message: `网络请求失败：${err.message}`,
+      };
+    }
+
+    return { kind: 'unknown', message: `加载失败：${err.message}` };
+  }
+
+  return { kind: 'unknown', message: `未知错误，请稍后重试` };
+}
 
 export default function ModelViewer({ modelUrl }: ModelViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -20,14 +87,14 @@ export default function ModelViewer({ modelUrl }: ModelViewerProps) {
     controls: null as OrbitControls | null,
     model: null as THREE.Group | null,
     animationId: 0,
-    loadState: 'idle' as LoadState,
   });
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [loadStatus, setLoadStatus] = useState<LoadStatus>({ type: 'idle' });
 
-  const dispose = useCallback(() => {
-    const state = stateRef.current;
-    if (state.animationId) cancelAnimationFrame(state.animationId);
-    if (state.model) {
-      state.model.traverse((child) => {
+  const cleanupModel = useCallback(() => {
+    const oldModel = stateRef.current.model;
+    if (oldModel) {
+      oldModel.traverse((child) => {
         if (child instanceof THREE.Mesh) {
           child.geometry?.dispose();
           if (child.material) {
@@ -41,22 +108,32 @@ export default function ModelViewer({ modelUrl }: ModelViewerProps) {
           }
         }
       });
-      state.scene?.remove(state.model);
-      state.model = null;
+      stateRef.current.scene?.remove(oldModel);
+      stateRef.current.model = null;
     }
+  }, []);
+
+  const dispose = useCallback(() => {
+    const state = stateRef.current;
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
+    if (state.animationId) cancelAnimationFrame(state.animationId);
+    cleanupModel();
     state.renderer?.dispose();
     state.controls?.dispose();
     state.scene = null;
     state.camera = null;
     state.renderer = null;
     state.controls = null;
-  }, []);
+  }, [cleanupModel]);
 
+  // --- 初始化 Three.js 基础设施 ---
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
-    // --- 初始化 Three.js 基础设施 ---
     const scene = new THREE.Scene();
 
     const camera = new THREE.PerspectiveCamera(
@@ -79,9 +156,8 @@ export default function ModelViewer({ modelUrl }: ModelViewerProps) {
     renderer.toneMappingExposure = 1.2;
     container.appendChild(renderer.domElement);
 
-    // --- 光照 ---
-    const ambientLight = new THREE.AmbientLight(0xffffff, 1.5);
-    scene.add(ambientLight);
+    // 光照
+    scene.add(new THREE.AmbientLight(0xffffff, 1.5));
 
     const keyLight = new THREE.DirectionalLight(0xffffff, 4);
     keyLight.position.set(5, 8, 5);
@@ -95,7 +171,7 @@ export default function ModelViewer({ modelUrl }: ModelViewerProps) {
     rimLight.position.set(0, -0.5, -5);
     scene.add(rimLight);
 
-    // --- 环境贴图 (渐变背景) ---
+    // 环境贴图
     const bgCanvas = document.createElement('canvas');
     bgCanvas.width = 512;
     bgCanvas.height = 512;
@@ -112,12 +188,12 @@ export default function ModelViewer({ modelUrl }: ModelViewerProps) {
     scene.environment = bgTexture;
     scene.environmentIntensity = 0.3;
 
-    // --- 地面参考网格 ---
+    // 地面参考网格
     const gridHelper = new THREE.PolarGridHelper(1.5, 16, 10, 64, 0x444466, 0x444466);
     gridHelper.position.y = -1.2;
     scene.add(gridHelper);
 
-    // --- OrbitControls ---
+    // OrbitControls
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
@@ -132,7 +208,6 @@ export default function ModelViewer({ modelUrl }: ModelViewerProps) {
     stateRef.current.renderer = renderer;
     stateRef.current.controls = controls;
 
-    // --- 动画循环 ---
     function animate() {
       stateRef.current.animationId = requestAnimationFrame(animate);
       controls.update();
@@ -140,7 +215,6 @@ export default function ModelViewer({ modelUrl }: ModelViewerProps) {
     }
     animate();
 
-    // --- 窗口大小自适应 ---
     const onResize = () => {
       if (!container || !camera || !renderer) return;
       const w = container.clientWidth;
@@ -155,35 +229,23 @@ export default function ModelViewer({ modelUrl }: ModelViewerProps) {
       window.removeEventListener('resize', onResize);
       dispose();
     };
-  }, [dispose]); // 只在挂载时初始化一次
+  }, [dispose]);
 
-  // --- 加载 GLTF 模型 ---
+  // --- 加载 GLTF 模型（含超时 / 404 / 格式异常处理）---
   useEffect(() => {
     const { scene } = stateRef.current;
     if (!scene) return;
 
-    // 移除旧模型
-    const oldModel = stateRef.current.model;
-    if (oldModel) {
-      oldModel.traverse((child) => {
-        if (child instanceof THREE.Mesh) {
-          child.geometry?.dispose();
-          if (child.material) {
-            const materials = Array.isArray(child.material) ? child.material : [child.material];
-            materials.forEach((m) => {
-              Object.values(m).forEach((v) => {
-                if (v instanceof THREE.Texture) v.dispose();
-              });
-              m.dispose();
-            });
-          }
-        }
-      });
-      scene.remove(oldModel);
-      stateRef.current.model = null;
+    // 清除之前的超时
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
     }
 
-    stateRef.current.loadState = 'loading';
+    // 移除旧模型
+    cleanupModel();
+
+    setLoadStatus({ type: 'loading', progress: 0 });
 
     const dracoLoader = new DRACOLoader();
     dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.7/');
@@ -191,17 +253,30 @@ export default function ModelViewer({ modelUrl }: ModelViewerProps) {
     const loader = new GLTFLoader();
     loader.setDRACOLoader(dracoLoader);
 
+    // 超时控制
+    const timeoutId = setTimeout(() => {
+      const error: LoadError = {
+        kind: 'timeout',
+        message: `模型加载超时（超过 ${LOAD_TIMEOUT_MS / 1000} 秒），请检查网络连接后重试`,
+      };
+      setLoadStatus({ type: 'error', error });
+    }, LOAD_TIMEOUT_MS);
+    timeoutRef.current = timeoutId;
+
     loader.load(
       modelUrl,
       (gltf) => {
+        // 加载成功，清除超时
+        clearTimeout(timeoutId);
+        timeoutRef.current = null;
+
         const model = gltf.scene;
 
-        // 自动居中与缩放
         const box = new THREE.Box3().setFromObject(model);
         const center = box.getCenter(new THREE.Vector3());
         const size = box.getSize(new THREE.Vector3());
         const maxDim = Math.max(size.x, size.y, size.z);
-        const scale = 1.5 / maxDim;
+        const scale = maxDim > 0 ? 1.5 / maxDim : 1;
 
         model.scale.setScalar(scale);
         model.position.set(-center.x * scale, -center.y * scale, -center.z * scale);
@@ -215,18 +290,137 @@ export default function ModelViewer({ modelUrl }: ModelViewerProps) {
 
         scene.add(model);
         stateRef.current.model = model;
-        stateRef.current.loadState = 'success';
+        setLoadStatus({ type: 'success' });
       },
-      undefined, // onProgress
-      () => {
-        stateRef.current.loadState = 'error';
+      (event: { loaded: number; total: number }) => {
+        if (event.total > 0) {
+          setLoadStatus({ type: 'loading', progress: event.loaded / event.total });
+        }
+      },
+      (err: unknown) => {
+        // 错误回调
+        clearTimeout(timeoutId);
+        timeoutRef.current = null;
+        const error = classifyLoadError(err, modelUrl);
+        setLoadStatus({ type: 'error', error });
       },
     );
 
     return () => {
+      clearTimeout(timeoutId);
       dracoLoader.dispose();
     };
-  }, [modelUrl]);
+  }, [modelUrl, cleanupModel]);
 
-  return <div ref={containerRef} className="w-full h-full" />;
+  // --- 重试处理 ---
+  const handleRetry = useCallback(() => {
+    // 通过切换 URL key 来重新触发加载效果
+    // 先设 idle，再触发生命周期中的重新加载
+    setLoadStatus({ type: 'idle' });
+    // 使用微延迟确保 React 处理了 idle 状态后再触发重新加载
+    setTimeout(() => {
+      setLoadStatus({ type: 'loading', progress: 0 });
+    }, 50);
+  }, []);
+
+  // 强制重新触发加载 effect（当重试时）
+  const [retryKey, setRetryKey] = useState(0);
+  const handleRetryWithKey = useCallback(() => {
+    handleRetry();
+    setRetryKey((k: number) => k + 1);
+  }, [handleRetry]);
+
+  const status = loadStatus;
+
+  return (
+    <div ref={containerRef} className="w-full h-full relative">
+      {/* 加载中 */}
+      {status.type === 'loading' && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-gray-950/60 backdrop-blur-sm">
+          <div className="flex flex-col items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center">
+              <svg
+                className="h-8 w-8 animate-spin text-primary-400"
+                fill="none"
+                viewBox="0 0 24 24"
+              >
+                <circle
+                  className="opacity-25"
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke="currentColor"
+                  strokeWidth="4"
+                />
+                <path
+                  className="opacity-75"
+                  fill="currentColor"
+                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                />
+              </svg>
+            </div>
+            <span className="text-xs text-gray-400">
+              加载中{status.progress > 0 ? ` ${Math.round(status.progress * 100)}%` : '...'}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* 错误 */}
+      {status.type === 'error' && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-gray-950/80 backdrop-blur-sm">
+          <div className="flex flex-col items-center gap-4 max-w-xs text-center px-6 py-8 rounded-2xl bg-gray-900/90 border border-gray-800 shadow-2xl">
+            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-red-500/10 ring-1 ring-red-500/20">
+              <svg
+                className="h-6 w-6 text-red-400"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={1.5}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z"
+                />
+              </svg>
+            </div>
+            <div>
+              <p className="text-sm font-medium text-gray-200">
+                {status.error.kind === 'timeout' && '加载超时'}
+                {status.error.kind === 'not-found' && '文件不存在'}
+                {status.error.kind === 'format' && '格式错误'}
+                {status.error.kind === 'network' && '网络错误'}
+                {status.error.kind === 'unknown' && '加载失败'}
+              </p>
+              <p className="mt-1.5 text-xs text-gray-500 leading-relaxed">{status.error.message}</p>
+            </div>
+            <button
+              onClick={handleRetryWithKey}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-primary-600/20 px-4 py-2 text-xs font-medium text-primary-300
+                         border border-primary-500/30 hover:bg-primary-600/30 active:scale-95 transition-all duration-200"
+            >
+              <svg
+                className="h-3.5 w-3.5"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182"
+                />
+              </svg>
+              重新加载
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 隐藏的 key 用于强制重新触发加载 */}
+      <span data-retry-key={retryKey} className="hidden" />
+    </div>
+  );
 }
