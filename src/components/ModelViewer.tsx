@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
+import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
 
 const LOAD_TIMEOUT_MS = 30_000;
 
@@ -76,6 +77,53 @@ function classifyLoadError(err: unknown, url: string): LoadError {
   }
 
   return { kind: 'unknown', message: `未知错误，请稍后重试` };
+}
+
+type LoaderStrategy = {
+  loader: THREE.Loader;
+  extractModel: (result: unknown) => THREE.Group;
+  dispose: () => void;
+};
+
+function getLoaderStrategy(url: string): LoaderStrategy {
+  const ext = url.split('?')[0].split('.').pop()?.toLowerCase();
+
+  if (ext === 'obj') {
+    return {
+      loader: new OBJLoader(),
+      extractModel: (result) => result as THREE.Group,
+      dispose: () => {},
+    };
+  }
+
+  // GLTF / GLB (default)
+  const dracoLoader = new DRACOLoader();
+  dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.7/');
+  const loader = new GLTFLoader();
+  loader.setDRACOLoader(dracoLoader);
+  return {
+    loader,
+    extractModel: (result: unknown) => (result as { scene: THREE.Group }).scene,
+    dispose: () => dracoLoader.dispose(),
+  };
+}
+
+function setupModel(model: THREE.Group): void {
+  const box = new THREE.Box3().setFromObject(model);
+  const center = box.getCenter(new THREE.Vector3());
+  const size = box.getSize(new THREE.Vector3());
+  const maxDim = Math.max(size.x, size.y, size.z);
+  const scale = maxDim > 0 ? 1.5 / maxDim : 1;
+
+  model.scale.setScalar(scale);
+  model.position.set(-center.x * scale, -center.y * scale, -center.z * scale);
+
+  model.traverse((child) => {
+    if (child instanceof THREE.Mesh) {
+      child.castShadow = true;
+      child.receiveShadow = true;
+    }
+  });
 }
 
 export default function ModelViewer({ modelUrl }: ModelViewerProps) {
@@ -231,29 +279,21 @@ export default function ModelViewer({ modelUrl }: ModelViewerProps) {
     };
   }, [dispose]);
 
-  // --- 加载 GLTF 模型（含超时 / 404 / 格式异常处理）---
+  // --- 加载模型（GLTF / GLB / OBJ，含超时 + 错误处理）---
   useEffect(() => {
     const { scene } = stateRef.current;
     if (!scene) return;
 
-    // 清除之前的超时
     if (timeoutRef.current) {
       clearTimeout(timeoutRef.current);
       timeoutRef.current = null;
     }
 
-    // 移除旧模型
     cleanupModel();
-
     setLoadStatus({ type: 'loading', progress: 0 });
 
-    const dracoLoader = new DRACOLoader();
-    dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.7/');
+    const strategy = getLoaderStrategy(modelUrl);
 
-    const loader = new GLTFLoader();
-    loader.setDRACOLoader(dracoLoader);
-
-    // 超时控制
     const timeoutId = setTimeout(() => {
       const error: LoadError = {
         kind: 'timeout',
@@ -263,31 +303,14 @@ export default function ModelViewer({ modelUrl }: ModelViewerProps) {
     }, LOAD_TIMEOUT_MS);
     timeoutRef.current = timeoutId;
 
-    loader.load(
+    strategy.loader.load(
       modelUrl,
-      (gltf) => {
-        // 加载成功，清除超时
+      (result) => {
         clearTimeout(timeoutId);
         timeoutRef.current = null;
 
-        const model = gltf.scene;
-
-        const box = new THREE.Box3().setFromObject(model);
-        const center = box.getCenter(new THREE.Vector3());
-        const size = box.getSize(new THREE.Vector3());
-        const maxDim = Math.max(size.x, size.y, size.z);
-        const scale = maxDim > 0 ? 1.5 / maxDim : 1;
-
-        model.scale.setScalar(scale);
-        model.position.set(-center.x * scale, -center.y * scale, -center.z * scale);
-
-        model.traverse((child) => {
-          if (child instanceof THREE.Mesh) {
-            child.castShadow = true;
-            child.receiveShadow = true;
-          }
-        });
-
+        const model = strategy.extractModel(result);
+        setupModel(model);
         scene.add(model);
         stateRef.current.model = model;
         setLoadStatus({ type: 'success' });
@@ -298,7 +321,6 @@ export default function ModelViewer({ modelUrl }: ModelViewerProps) {
         }
       },
       (err: unknown) => {
-        // 错误回调
         clearTimeout(timeoutId);
         timeoutRef.current = null;
         const error = classifyLoadError(err, modelUrl);
@@ -308,7 +330,7 @@ export default function ModelViewer({ modelUrl }: ModelViewerProps) {
 
     return () => {
       clearTimeout(timeoutId);
-      dracoLoader.dispose();
+      strategy.dispose();
     };
   }, [modelUrl, cleanupModel]);
 
