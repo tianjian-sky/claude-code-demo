@@ -1,5 +1,8 @@
 import { useState } from 'react';
 import ModelViewer from './components/ModelViewer';
+import TutorialPage from './components/TutorialPage';
+
+type ViewMode = 'viewer' | 'tutorial';
 
 type ModelInfo = {
   name: string;
@@ -156,47 +159,80 @@ const Footer = () => (
 
 export default function App() {
   const [currentModel, setCurrentModel] = useState<ModelInfo>(DEMO_MODELS[0]);
+  const [viewMode, setViewMode] = useState<ViewMode>('viewer');
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-gray-950">
       {/* 侧边栏 */}
       <aside className="w-80 shrink-0 border-r border-gray-800/80 bg-gray-900/95 backdrop-blur-sm flex flex-col">
         <Header />
-        <div className="flex-1 overflow-y-auto custom-scrollbar px-3 py-4 space-y-1.5">
-          <div className="flex items-center justify-between px-1 mb-2">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-gray-600">
-              模型列表
-            </p>
-            <span className="text-[10px] text-gray-600">{DEMO_MODELS.length} 个模型</span>
+
+        {/* 视图切换 */}
+        <div className="px-3 py-2 border-b border-gray-800/80">
+          <div className="flex rounded-lg bg-gray-800/50 p-0.5">
+            {([
+              ['viewer', '3D 预览'],
+              ['tutorial', '教程'],
+            ] as const).map(([mode, label]) => (
+              <button
+                key={mode}
+                onClick={() => setViewMode(mode)}
+                className={`flex-1 rounded-md py-1.5 text-[11px] font-medium transition-all duration-200
+                  ${
+                    viewMode === mode
+                      ? 'bg-primary-600 text-white shadow-sm shadow-primary-600/25'
+                      : 'text-gray-500 hover:text-gray-300'
+                  }`}
+              >
+                {label}
+              </button>
+            ))}
           </div>
-          {DEMO_MODELS.map((model, i) => (
-            <ModelCard
-              key={model.name}
-              model={model}
-              index={i}
-              isActive={currentModel.name === model.name}
-              onClick={() => setCurrentModel(model)}
-            />
-          ))}
         </div>
-        <Footer />
+
+        {viewMode === 'viewer' && (
+          <>
+            <div className="flex-1 overflow-y-auto custom-scrollbar px-3 py-4 space-y-1.5">
+              <div className="flex items-center justify-between px-1 mb-2">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-gray-600">
+                  模型列表
+                </p>
+                <span className="text-[10px] text-gray-600">{DEMO_MODELS.length} 个模型</span>
+              </div>
+              {DEMO_MODELS.map((model, i) => (
+                <ModelCard
+                  key={model.name}
+                  model={model}
+                  index={i}
+                  isActive={currentModel.name === model.name}
+                  onClick={() => setCurrentModel(model)}
+                />
+              ))}
+            </div>
+            <Footer />
+          </>
+        )}
       </aside>
 
-      {/* 3D 预览区 */}
-      <main className="flex-1 relative">
-        <ModelViewer key={currentModel.url} modelUrl={currentModel.url} />
-        <div className="absolute bottom-5 left-5 px-3.5 py-2 rounded-xl bg-gray-900/85 backdrop-blur-md border border-gray-800/80 shadow-xl shadow-black/20">
-          <div className="flex items-center gap-2.5">
-            <span className="text-base">
-              {DEMO_MODELS.find((m) => m.name === currentModel.name)?.icon}
-            </span>
-            <div>
-              <span className="text-xs font-medium text-gray-300">{currentModel.name}</span>
-              <span className="text-[10px] text-gray-600 ml-2">GLTF</span>
+      {/* 主内容区 */}
+      {viewMode === 'viewer' ? (
+        <main className="flex-1 relative">
+          <ModelViewer key={currentModel.url} modelUrl={currentModel.url} />
+          <div className="absolute bottom-5 left-5 px-3.5 py-2 rounded-xl bg-gray-900/85 backdrop-blur-md border border-gray-800/80 shadow-xl shadow-black/20">
+            <div className="flex items-center gap-2.5">
+              <span className="text-base">
+                {DEMO_MODELS.find((m) => m.name === currentModel.name)?.icon}
+              </span>
+              <div>
+                <span className="text-xs font-medium text-gray-300">{currentModel.name}</span>
+                <span className="text-[10px] text-gray-600 ml-2">GLTF</span>
+              </div>
             </div>
           </div>
-        </div>
-      </main>
+        </main>
+      ) : (
+        <TutorialPage />
+      )}
     </div>
   );
 }

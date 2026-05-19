@@ -23,3 +23,11 @@
 ```
 @src/components/ModelViewer.tsx 为这个组件的模型加载方法中，增加obj格式模型文件的加载代码。可以适当的重构原有的代码逻辑，使他未来能更方便地支持更多格式的模型文件加载
 ```
+
+```
+开发一个页面组件，实现https://www.figma.com/design/ibkLY9wsmpuGVBxf2RFmaf/532861047-s-team-library?node-id=0-1&p=f&t=hNyitbCFR3AyIo9M-0 这个网页里的第9张设计稿
+```
+
+```
+好的，那就按照这个计划执行
+```
